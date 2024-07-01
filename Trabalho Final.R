@@ -6,18 +6,25 @@ install.packages("dplyr")
 library(dplyr)
 install.packages("readr")
 library(readr)
+install.packages("usethis")
+library(usethis)
+edit_r_environ()
+gitcreds::gitcreds_get()
+.rs.restartR()
+install.packages("gh")
+library(gh)
+gh::gh("GET /user")
+install.packages("git2r")
+library(git2r)
 
 ## DADOS CRIMINAIS ------
 
 # Carregando base de crimes do Anuário Brasileiro de Segurança Pública 
 
 caminho_arquivo <- "/Users/jfmabs/Downloads/uf.csv.gz"
+
 dados_crimes <- read.csv(gzfile(caminho_arquivo))
-
-##  Retirando valores 0 da base para NA
-
-dados_crimes <- df %>% mutate(across(everything(), as.character))
-df[df == 0] <- NA
+dados_crimesteste <- read.csv(gzfile(caminho_arquivo))
 
 ## Criando variável com o nome "mandato" referindo-se aos quatro
 ## anos de atuação no governo
@@ -27,6 +34,7 @@ dados_crimes <- dados_crimes %>%
     ano %in% 2011:2014 ~ "2011-2014",
     ano %in% 2015:2018 ~ "2015-2018",
     ano %in% 2019:2022 ~ "2019-2022",
+    ano %in% 2023:2026 ~ "2023-2026",
     TRUE ~ NA_character_ # caso existam anos fora desses intervalos
   ))
 
@@ -40,9 +48,20 @@ dados_crimes <- dados_crimes %>%
 
 crimes_agregados <- dados_crimes %>%
   group_by(sigla_uf, mandato) %>%
-  summarise(across(where(is.numeric), ~ mean(.x, na.rm = TRUE)))
+  summarise(across(where(is.numeric), ~ mean(.x, na.rm = T)))
 
-## Excluindo a coluna "ano", que não importa mais, pois analisamos apenas o mandato
+mean_exclude <- function(x) {
+  x <- x[!is.na(x) & x != 0 & !is.nan(x)] # Excluir 0, NaN e NA
+  if(length(x) == 0) return(NA) # Retornar NA se não houver valores válidos
+  mean(x)
+}
+
+crimes_agregados <- dados_crimes %>%
+  group_by(sigla_uf, mandato) %>%
+  summarise(across(where(is.numeric), ~ mean_exclude(.x)))
+
+
+## DELETAR Excluindo a coluna "ano", que não importa mais, pois analisamos apenas o mandato
 
 crimes_agregados <- subset(crimes_agregados, select = -ano)
 
@@ -62,7 +81,7 @@ crimes_agregados <- crimes_agregados %>%
 ## que 2009 
 
 
-dados_partidos <- BLS9_full %>% filter(wave >= 2009)
+dados_partidos <- read_csv("BLS9_full.csv") %>% filter(wave >= 2009)
 
 ## Selecionar as variáveis de interesse
 
@@ -153,7 +172,7 @@ bolognesi <- read.table("BD_survey_partyideology_brasil_expert_2018_HARVARD_DV.t
 # Carregar base de dados de governadores, seus mandatos e partidos
 
 
-dados_governadores <- read_csv("dados governadores - Página1.csv")
+dados_governadores2 <- read_csv("dados governadores2 - Página1.csv")
 
 # Calculando a média dos valores do survey de Bolognesi de acordo
 # com os partidos
@@ -168,7 +187,7 @@ média_bolognesi <- bolognesi %>%
 ## que correspondem às médias das taxas de crimes
 
 crimes_governadores <- left_join(crimes_agregados, 
-    dados_governadores, by = c("mandato" = "ano", "estado" = "estado"))
+    dados_governadores2, by = c("mandato" = "ano", "estado" = "estado"))
 
 ## Excluindo colunas que não importam ou estão duplicadas
 
@@ -271,7 +290,112 @@ gov_crim_ide_ideologia <- merge(gov.crim.ide, zucco_class_longo,
                                 by.y = c("partido", "wave"),
                                 all.x = TRUE)
 
+gov_crim_ide_ideologia <- gov_crim_ide_ideologia %>%
+  mutate(across(where(is.numeric), ~ round(.x, 2)))
 
-typeof(bolognesi_invertido)
-glimpse(bolognesi_invertido)
 
+##  Retirando valores 0 da base para NA
+
+dados_crimes <- dados_crimes %>% mutate(across(everything(), as.character))
+dados_crimes[dados_crimes == 0] <- NA
+
+## Teste de hipótese
+
+populacao_ano <- ipeadata_20_06_2024_10_18_ %>%
+  select(Sigla, Estado, "2014", "2018", "2022")
+
+anos_referencia <- list('2011-2014' = 2014,
+                        '2015-2018' = 2018,
+                        '2019-2022' = 2022)
+
+populacao_ano <- rename(populacao_ano, sigla = sigla_uf)
+
+populacao_long <- populacao_ano %>%
+  pivot_longer(cols = starts_with("20"),  # Seleciona as colunas de anos
+               names_to = "Ano",          # Nome para a coluna de anos
+               values_to = "Populacao")  # Nome para a coluna de população
+
+populacao_long <- populacao_long %>%
+  mutate(Ano_modificado = case_when(
+    Ano == "2014" ~ "2011-2014",
+    Ano == "2018" ~ "2015-2018",
+    Ano == "2022" ~ "2019-2022",
+    TRUE ~ Ano  # Para outros casos, manter o valor original
+  ))
+
+populacao_long <- populacao_long %>%
+  select(-Ano)
+
+populacao_long <- rename(populacao_long, ano = Ano_modificado)
+
+populacao_crimes <- gov_crim_ide_ideologia %>%
+  left_join(populacao_long, by = c("sigla_uf" = "Sigla", "mandato" = "ano"))
+
+taxas_crimes <- populacao_crimes %>%
+  mutate(across(starts_with("quantidade_"), ~ . / Populacao * 100)) %>%
+  select(partido, mandato, sigla_uf, valores_bolognesi, ideologia_zucco, despesa_empenhada_seguranca_publica, starts_with("quantidade_"))
+
+install.packages("ggplot2")
+library(ggplot2)
+install.packages("stats")
+library(stats)
+
+intervalos <- c(0, 1.5, 3, 4.5, 5.5, 7, 8.5, 10)
+rotulos <- c("Extrema-Esquerda", "Esquerda", "Centro-Esquerda", "Centro", "Centro-Direita", "Direita", "Extrema-Direita")
+
+taxas_crimes$categoria_bolognesi <- cut(taxas_crimes$valores_bolognesi, breaks = intervalos, labels = rotulos)
+
+modelo <- lm(cbind(quantidade_morte_intervencao_policial_civil_servico, 
+                   quantidade_morte_intervencao_policial_civil_fora_servico, 
+                   quantidade_morte_intervencao_policial_militar_fora_servico,
+                   quantidade_morte_intervencao_policial_militar_servico,
+                   quantidade_policial_civil_morto_confronto_servico,
+                   quantidade_policial_civil_morto_confronto_fora_servico,
+                   quantidade_policial_militar_morto_confronto_servico,
+                   quantidade_policial_militar_morto_confronto_fora_servico) ~ cbind(
+                                                                                     ideologia_zucco), data = taxas_crimes)
+modelo <- lm(cbind(
+                   quantidade_morte_intervencao_policial_militar_servico,
+                   quantidade_policial_militar_morto_confronto_servico
+                   ) ~ cbind(
+                     ideologia_zucco), data = taxas_crimes)
+
+summary(modelo)
+
+modelo2 <- lm(cbind(quantidade_feminicidio, 
+                   quantidade_vitima_homicidio_doloso,
+                   quantidade_latrocinio,
+                   quantidade_lesao_corporal_seguida_de_morte,
+                   quantidade_morte_a_esclarecer,
+                   quantidade_morte_violenta_intencional,
+                   quantidade_suicidio,
+                   quantidade_estupro,
+                   quantidade_tentativa_estupro) ~ cbind(
+                                                         valores_bolognesi), data = taxas_crimes)
+
+modelo3 <- lm(cbind(despesa_empenhada_seguranca_publica,
+                    quantidade_populacao_sistema_penitenciario) ~ cbind(categoria_bolognesi, ideologia_zucco) + factor(mandato), data = taxas_crimes)
+
+summary(modelo2)
+
+modelo4 <- lm(quantidade_populacao_sistema_penitenciario ~ 
+                categoria_bolognesi + factor(mandato), data = taxas_crimes)
+summary(modelo4)
+
+taxas_crimes2 <- taxas_crimes %>%
+  arrange(sigla_uf, mandato)
+
+taxas_crimes2 <- taxas_crimes2 %>%
+  group_by(sigla_uf) %>%
+  mutate(mudanca_ideologica = ifelse(lag(categoria_bolognesi) == categoria_bolognesi, 0, 1))
+
+taxas_crimes2 <- taxas_crimes2 %>%
+  group_by(sigla_uf) %>%
+  mutate(
+    transicao_ideologica = case_when(
+      lag(categoria_bolognesi) %in% c("Extrema-Esquerda", "Esquerda", "Centro") & 
+        categoria_bolognesi %in% c("Direita", "Extrema-Direita") ~ 1,
+      lag(categoria_bolognesi) == "Direita" & categoria_bolognesi == "Extrema-Direita" ~ 1,
+      TRUE ~ 0
+    )
+  )
