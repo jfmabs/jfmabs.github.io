@@ -1,0 +1,301 @@
+---
+title: "Tarefa 4"
+author: "João Felipe Marques"
+date: "2024-06-28"
+output: ioslides_presentation
+---
+
+```{r setup, include = F}
+knitr::opts_chunk$set(echo = T)
+library(ggplot2)
+library(reshape2)
+library(dplyr)
+library(officer)
+library(infer)
+library(readr)
+library(tidyr)
+library(readxl)
+library(usethis)
+```
+
+```{r, include = F}
+# Carregando base de crimes do Anuário Brasileiro de Segurança Pública 
+dados_crimes <- read.csv("/Users/jfmabs/Downloads/uf.csv.gz") %>%
+  mutate(
+    mandato = case_when(
+      ano %in% 2011:2014 ~ "2011-2014",
+      ano %in% 2015:2018 ~ "2015-2018",
+      ano %in% 2019:2022 ~ "2019-2022",
+      ano %in% 2023:2026 ~ "2023-2026",
+      TRUE ~ NA_character_ # caso existam anos fora desses intervalos
+    )
+  ) %>%
+  filter(!is.na(mandato)) %>%  # Filtrar casos de NA em 'mandato'
+  mutate(across(everything(), ~ ifelse(. == 0, NA_character_, as.character(.))))
+
+## Agregando as taxas criminais para a média dos 4 anos de cada mandato
+
+crimes_agregados <- dados_crimes %>%
+  group_by(sigla_uf, mandato) %>%
+  mutate(across(where(is.numeric), ~ {
+    x <- .x[!is.na(.x) & .x != 0 & !is.nan(.x)]
+    if(length(x) == 0) NA else mean(x)
+  }, .names = "mean_{.col}")) %>%
+  ungroup()
+
+
+
+## Criando um dataframe com nomes e siglas dos estados, para inserir na
+## base de dados dos crimes
+
+estados <- data.frame(sigla_uf = c("AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO"),
+                      estado = c("Acre", "Alagoas", "Amapá", "Amazonas", "Bahia", "Ceará", "Distrito Federal", "Espírito Santo", "Goiás", "Maranhão", "Mato Grosso", "Mato Grosso do Sul", "Minas Gerais", "Pará", "Paraíba", "Paraná", "Pernambuco", "Piauí", "Rio de Janeiro", "Rio Grande do Norte", "Rio Grande do Sul", "Rondônia", "Roraima", "Santa Catarina", "São Paulo", "Sergipe", "Tocantins"))
+
+crimes_agregados_estados <- crimes_agregados %>%
+  left_join(estados, by = "sigla_uf")
+
+
+## BRAZILIAN LEGISLATIVE SURVEY ----
+
+## Nos dados dos partidos, coletado do BLS retirar casos mais antigos
+## que 2009 
+
+
+dados_partidos <- read_csv("/Users/jfmabs/Desktop/Dados/BLS9_full.csv") %>%
+  filter(wave >= 2009) %>%
+  select(lrclass, wave,
+         lrpmdb, lrdem, lrpcb, lrpcdob, lrpds,
+         lrpfl, lrpl, lrpp, lrpp_ppb, lrpps, lrpr, lrpsb, lrpsd, lrpsdb, lrpsol,
+         lrpt, lrptb, lrsd, lrpsc, lrpros, lrpv, lrmdb, lrpsl, lrcid, lrrep,
+         lrpode, lrnovo, lrpdt) %>%
+  mutate_all(~ ifelse(. == -999.0, NA, .)) %>%
+  mutate(wave = case_when(
+    wave == 2009 ~ "2011-2014",
+    wave == 2013 ~ "2015-2018",
+    wave == 2017 ~ "2019-2022",
+    wave == 2021 ~ "2023-2026",
+    TRUE ~ as.character(wave)
+  )) %>%
+  mutate(across(everything(), ~ ifelse(is.nan(.x) | .x == "NaN", NA_real_, .x))) %>%
+  group_by(wave) %>%
+  summarise(across(where(is.numeric), mean, na.rm = TRUE))
+
+# Unindo dados do PMDB e MDB e excluindo a variável do PMDB
+
+valores_PMDB <- dados_partidos$lrpmdb[1:3]
+
+dados_partidos$lrmdb[1:3] <- valores_PMDB
+
+media_por_wave <- dados_partidos %>%
+  select(-lrpmdb, -lrrep)
+
+# Mudando o nome das colunas pra algo que eu consiga entender bem
+
+
+zucco_class_longo <- media_por_wave %>%
+  rename(
+    DEM = lrdem, 
+    PCdoB = lrpcdob, 
+    PL = lrpl, 
+    PP = lrpp_ppb, 
+    PPS = lrpps,
+    PR = lrpr, 
+    PSB = lrpsb, 
+    PSD = lrpsd, 
+    PSDB = lrpsdb,
+    PSOL = lrpsol, 
+    PT = lrpt, 
+    PTB = lrptb, 
+    SDD = lrsd,
+    PSC = lrpsc, 
+    PROS = lrpros, 
+    PV = lrpv, 
+    MDB = lrmdb,
+    PSL = lrpsl, 
+    CIDADANIA = lrcid,
+    PODE = lrpode, 
+    NOVO = lrnovo, 
+    PDT = lrpdt
+  ) %>%
+  pivot_longer(
+    cols = -wave,
+    names_to = "partido",
+    values_to = "ideologia_zucco"
+  )
+
+
+## BOLOGNESI ----
+
+# Carregar dados da base de Bolognesi
+
+bolognesi <- read.table("/Users/jfmabs/Desktop/Dados/BD_survey_partyideology_brasil_expert_2018_HARVARD_DV.tab", 
+                        header = TRUE, sep = "\t", quote = "", fill = TRUE)
+
+dados_governadores2 <- read_csv("/Users/jfmabs/Desktop/Dados/dados governadores2 - Página1.csv")
+
+média_bolognesi <- bolognesi %>%
+  summarise(across(everything(), mean, na.rm = TRUE))
+
+
+# MESCLANDO BASES ----
+
+## Unindo as bases com dados dos governadores, mandatos e partidos, com os períodos
+## que correspondem às médias das taxas de crimes
+
+crimes_governadores <- left_join(crimes_agregados_estados, 
+                                 dados_governadores2, by = c("mandato" = "ano", 
+                                                             "estado" = "estado")) %>%
+  select(-sigla_estado, -ideologia_part, -apoio_gov)
+
+
+
+# CORRIGINDO ERROS INICIAIS DOS BANCOS ----
+
+## Os bancos não apresentaram os nomes e partidos dos governadores da PB, RR e AL
+## provavelmente devido a um erro na codificação dos mandatos
+
+
+crimes_governadores_corrigido <- crimes_governadores %>%
+  mutate(
+    governador = case_when(
+      sigla_uf == "PB" & (mandato == "2011-2014" | mandato == "2015-2018") ~ "Ricardo Vieira Coutinho",
+      sigla_uf == "PB" & (mandato != "2011-2014" & mandato != "2015-2018") ~ governador,
+      sigla_uf == "AL" & mandato == "2011-2014" ~ "Teotônio Brandão Vilela Filho",
+      sigla_uf == "AL" & mandato == "2015-2018" ~ "Renan Filho",
+      sigla_uf == "AL" & (mandato != "2011-2014" & mandato != "2015-2018") ~ governador,
+      sigla_uf == "RR" & mandato == "2011-2014" ~ "José de Anchieta Júnior",
+      sigla_uf == "RR" & mandato == "2015-2018" ~ "Antonio Denarium",
+      sigla_uf == "RR" & (mandato != "2011-2014" & mandato != "2015-2018") ~ governador,
+      TRUE ~ governador
+    ),
+    partido = case_when(
+      sigla_uf == "PB" & (mandato == "2011-2014" | mandato == "2015-2018") ~ "PSDB",
+      sigla_uf == "PB" & (mandato != "2011-2014" & mandato != "2015-2018") ~ partido,
+      sigla_uf == "AL" & mandato == "2011-2014" ~ "PSDB",
+      sigla_uf == "AL" & mandato == "2015-2018" ~ "MDB",
+      sigla_uf == "AL" & (mandato != "2011-2014" & mandato != "2015-2018") ~ partido,
+      sigla_uf == "RR" & mandato == "2011-2014" ~ "PMDB",
+      sigla_uf == "RR" & mandato == "2015-2018" ~ "PSL",
+      sigla_uf == "RR" & (mandato != "2011-2014" & mandato != "2015-2018") ~ partido,
+      TRUE ~ partido
+    )
+  )
+
+
+## Os dados de bolognesi geraram uma base de dados com 80 colunas, em que
+## cada coluna apresentava um partido e o valor da ideologia.
+## Seria mais intuitivo transformar em uma base verticalizada, com uma coluna
+## intitulada "partido" e outra "ideologia", para análise posterior
+
+# INVERTENDO DADOS
+
+bolognesi_invertido <- média_bolognesi %>%
+  t() %>%
+  as.data.frame() %>%
+  setNames(.[1, ]) %>%
+  slice(-1)
+
+
+bolognesi_vertical <- média_bolognesi %>%
+  pivot_longer(cols = everything(), names_to = "partido", 
+               values_to = "valores_bolognesi")
+
+crimes_governadores <- crimes_governadores %>%
+  mutate(partido = case_when(
+    partido == "PMDB" ~ "MDB",
+    partido == "Progressistas" ~ "PP",
+    TRUE ~ partido  # Manter os demais partidos como estão
+  ))
+
+# Simplificação dos partidos em bolognesi_vertical
+bolognesi_vertical <- bolognesi_vertical %>%
+  mutate(partido = case_when(
+    partido == "Progressistas" ~ "PP",
+    TRUE ~ partido  # Manter os demais partidos como estão
+  ))
+
+## Adicionamos uma coluna à base crimes_governadores, contendo o valor da
+## ideologia por partido, de acordo com bolognesi.
+
+gov.crim.ide <- merge(crimes_governadores, bolognesi_vertical, 
+                      by = "partido", all.x = TRUE)
+
+
+## Agora vou adicionar uma coluna nova no banco para a classificação
+## do Cesar Zucco
+
+gov_crim_ide_ideologia <- merge(gov.crim.ide, zucco_class_longo,
+                                by.x = c("partido", "mandato"),
+                                by.y = c("partido", "wave"),
+                                all.x = TRUE) %>%
+  mutate(across(where(is.numeric), ~ round(.x, 2)))
+
+
+##  Retirando valores 0 da base para NA
+
+
+## Teste de hipótese
+
+ipeadata <- read_excel("/Users/jfmabs/Desktop/Dados/ipeadata[20-06-2024-10-18].xls")
+
+populacao_long <- ipeadata %>%
+  select(Sigla, Estado, "2014", "2018", "2022") %>%
+  rename(sigla = Sigla) %>%
+  pivot_longer(cols = starts_with("20"), names_to = "Ano", values_to = "Populacao") %>%
+  mutate(Ano_modificado = case_when(
+    Ano == "2014" ~ "2011-2014",
+    Ano == "2018" ~ "2015-2018",
+    Ano == "2022" ~ "2019-2022",
+    TRUE ~ Ano  # Manter o valor original para outros casos
+  )) %>%
+  select(-Ano)  # Remover a coluna Ano, se ainda estiver presente 
+
+populacao_long <- rename(populacao_long, ano = Ano_modificado)
+
+populacao_crimes <- gov_crim_ide_ideologia %>%
+  left_join(populacao_long, by = c("sigla_uf" = "sigla", "mandato" = "ano"))
+
+taxas_crimes <- populacao_crimes %>%
+  mutate(across(starts_with("quantidade_"), as.numeric)) %>%
+  mutate(Populacao = as.numeric(Populacao)) %>%
+  mutate(across(starts_with("quantidade_"), ~ . / Populacao * 100)) %>%
+  select(partido, mandato, sigla_uf, valores_bolognesi, ideologia_zucco, despesa_empenhada_seguranca_publica, starts_with("quantidade_"))
+
+
+taxas_crimes <- taxas_crimes %>%
+  mutate(categoria_bolognesi = cut(valores_bolognesi, 
+                                   breaks = c(0, 1.5, 3, 4.5, 5.5, 7, 8.5, 10), 
+                                   labels = c("Extrema-Esquerda", "Esquerda", "Centro-Esquerda", "Centro", "Centro-Direita", "Direita", "Extrema-Direita")))
+```
+
+## Indicadores de Segurança Pública e Ideologia Política
+
+Utilizando dados provenientes do Anuário Brasileiro de Segurança Pública e dos estudos sobre ideologia política dos partidos brasileiros de Zucco (2023) e Bolognesi (2022), comparo as médias de indicadores criminais em diferentes mandatos, com as ideologias políticas.
+
+```{r, include= F}
+bootstrap_distribution <- taxas_crimes %>% 
+  specify(response = quantidade_populacao_sistema_penitenciario) %>% 
+  generate(reps = 1000) %>% 
+  calculate(stat = "mean")
+bootstrap_distribution
+
+percentile_ci <- bootstrap_distribution %>% 
+  get_confidence_interval(level = 0.95, type = "percentile")
+percentile_ci
+
+```
+
+## Gráfico com estimativas intervalares de alguma variável de interesse
+Distribuição da taxa de encarcerados/100.000hab por estado
+
+```{r, echo=F}
+visualize(bootstrap_distribution) + 
+  shade_confidence_interval(endpoints = percentile_ci)
+```
+
+## A formulação de uma hipótese testável (apenas a hipótese, não é necessário testar agora)
+
+- Estados governados por políticos de direita apresentam maiores taxas de encarceramento.
+
+rmarkdown::render("/Users/jfmabs/jfmabs/tarefa4.Rmd")
+cd /Users/jfmabs/jfmabs.github.io
