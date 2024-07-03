@@ -8,14 +8,14 @@ install.packages("readr")
 library(readr)
 install.packages("usethis")
 library(usethis)
+install.packages("gh")
+library(gh)
+install.packages("git2r")
+library(git2r)
 edit_r_environ()
 gitcreds::gitcreds_get()
 .rs.restartR()
-install.packages("gh")
-library(gh)
 gh::gh("GET /user")
-install.packages("git2r")
-library(git2r)
 
 ## DADOS CRIMINAIS ------
 
@@ -345,38 +345,28 @@ rotulos <- c("Extrema-Esquerda", "Esquerda", "Centro-Esquerda", "Centro", "Centr
 
 taxas_crimes$categoria_bolognesi <- cut(taxas_crimes$valores_bolognesi, breaks = intervalos, labels = rotulos)
 
-modelo <- lm(cbind(quantidade_morte_intervencao_policial_civil_servico, 
-                   quantidade_morte_intervencao_policial_civil_fora_servico, 
-                   quantidade_morte_intervencao_policial_militar_fora_servico,
-                   quantidade_morte_intervencao_policial_militar_servico,
-                   quantidade_policial_civil_morto_confronto_servico,
-                   quantidade_policial_civil_morto_confronto_fora_servico,
-                   quantidade_policial_militar_morto_confronto_servico,
-                   quantidade_policial_militar_morto_confronto_fora_servico) ~ cbind(
-                                                                                     ideologia_zucco), data = taxas_crimes)
+modelo <- lm(cbind(quantidade_morte_intervencao_policial_civil_servico 
+                   ) ~ cbind(
+                     categoria_bolognesi), data = taxas_crimes)
+
 modelo <- lm(cbind(
                    quantidade_morte_intervencao_policial_militar_servico,
-                   quantidade_policial_militar_morto_confronto_servico
+                   quantidade_policial_militar_morto_confronto_servico,
+                   despesa_empenhada_seguranca_publica
                    ) ~ cbind(
-                     ideologia_zucco), data = taxas_crimes)
+                     ideologia_zucco, mandato), data = taxas_crimes2)
 
-summary(modelo)
 
-modelo2 <- lm(cbind(quantidade_feminicidio, 
-                   quantidade_vitima_homicidio_doloso,
-                   quantidade_latrocinio,
-                   quantidade_lesao_corporal_seguida_de_morte,
-                   quantidade_morte_a_esclarecer,
-                   quantidade_morte_violenta_intencional,
-                   quantidade_suicidio,
-                   quantidade_estupro,
-                   quantidade_tentativa_estupro) ~ cbind(
-                                                         valores_bolognesi), data = taxas_crimes)
+summary(modelo2)
+
+modelo2 <- lm(cbind(
+                   quantidade_morte_intervencao_policial_militar_servico) ~ cbind(
+                                                         ideologia_zucco), data = taxas_crimes)
 
 modelo3 <- lm(cbind(despesa_empenhada_seguranca_publica,
                     quantidade_populacao_sistema_penitenciario) ~ cbind(categoria_bolognesi, ideologia_zucco) + factor(mandato), data = taxas_crimes)
 
-summary(modelo2)
+summary(modelo3)
 
 modelo4 <- lm(quantidade_populacao_sistema_penitenciario ~ 
                 categoria_bolognesi + factor(mandato), data = taxas_crimes)

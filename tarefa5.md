@@ -7,7 +7,7 @@ João Felipe Marques
 Utilizando dados provenientes do Anuário Brasileiro de Segurança Pública
 e dos estudos sobre ideologia política dos partidos brasileiros de
 Bolognesi (2022), comparo as médias de indicadores criminais em
-diferentes mandatos, com as ideologias políticas.
+diferentes mandatos com as ideologias políticas.
 
 ## Hipótese testável
 
