@@ -1,7 +1,6 @@
 ---
-title: "tarefa5"
+title: "Relatório"
 author: "João Felipe Marques"
-date: "2024-07-03"
 output: github_document
 ---
 
@@ -18,11 +17,9 @@ library(readxl)
 library(usethis)
 ```
 
-# Relatório
-
 ## Indicadores de Segurança Pública e Ideologia Política
 
-Utilizando dados provenientes do Anuário Brasileiro de Segurança Pública e dos estudos sobre ideologia política dos partidos brasileiros de Bolognesi (2022), comparo as médias de indicadores criminais em diferentes mandatos, com as ideologias políticas.
+Utilizando dados provenientes do Anuário Brasileiro de Segurança Pública e dos estudos sobre ideologia política dos partidos brasileiros de Bolognesi (2022), comparo as médias de indicadores criminais em diferentes mandatos com as ideologias políticas.
 
 ```{r, include=FALSE}
 # Carregando base de crimes do Anuário Brasileiro de Segurança Pública 
@@ -273,7 +270,7 @@ taxas_crimes <- taxas_crimes %>%
                                    breaks = c(0, 1.5, 3, 4.5, 5.5, 7, 8.5, 10), 
                                    labels = c("Extrema-Esquerda", "Esquerda", "Centro-Esquerda", "Centro", "Centro-Direita", "Direita", "Extrema-Direita")))
 ```
-```{r}
+```{r, include=FALSE}
 bootstrap_distribution <- taxas_crimes %>% 
   specify(response = quantidade_populacao_sistema_penitenciario) %>% 
   generate(reps = 1000) %>% 
@@ -285,7 +282,7 @@ percentile_ci <- bootstrap_distribution %>%
 percentile_ci
 
 ```
-```{r, echo=F}
+```{r, include=FALSE}
 visualize(bootstrap_distribution) + 
   shade_confidence_interval(endpoints = percentile_ci)
 ```

@@ -1,9 +1,6 @@
-tarefa5
+Relatório
 ================
 João Felipe Marques
-2024-07-03
-
-# Relatório
 
 ## Indicadores de Segurança Pública e Ideologia Política
 
@@ -11,50 +8,6 @@ Utilizando dados provenientes do Anuário Brasileiro de Segurança Pública
 e dos estudos sobre ideologia política dos partidos brasileiros de
 Bolognesi (2022), comparo as médias de indicadores criminais em
 diferentes mandatos, com as ideologias políticas.
-
-``` r
-bootstrap_distribution <- taxas_crimes %>% 
-  specify(response = quantidade_populacao_sistema_penitenciario) %>% 
-  generate(reps = 1000) %>% 
-  calculate(stat = "mean")
-```
-
-    ## Warning: Removed 81 rows containing missing values.
-
-    ## Setting `type = "bootstrap"` in `generate()`.
-
-``` r
-bootstrap_distribution
-```
-
-    ## Response: quantidade_populacao_sistema_penitenciario (numeric)
-    ## # A tibble: 1,000 × 2
-    ##    replicate  stat
-    ##        <int> <dbl>
-    ##  1         1  367.
-    ##  2         2  372.
-    ##  3         3  354.
-    ##  4         4  353.
-    ##  5         5  350.
-    ##  6         6  382.
-    ##  7         7  366.
-    ##  8         8  349.
-    ##  9         9  355.
-    ## 10        10  364.
-    ## # ℹ 990 more rows
-
-``` r
-percentile_ci <- bootstrap_distribution %>% 
-  get_confidence_interval(level = 0.95, type = "percentile")
-percentile_ci
-```
-
-    ## # A tibble: 1 × 2
-    ##   lower_ci upper_ci
-    ##      <dbl>    <dbl>
-    ## 1     328.     374.
-
-![](tarefa5_files/figure-gfm/unnamed-chunk-3-1.png)<!-- -->
 
 ## Hipótese testável
 
