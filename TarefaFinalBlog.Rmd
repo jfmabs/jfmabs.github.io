@@ -1,0 +1,402 @@
+---
+title: "Testando a relação entre Indicadores de Segurança e Ideologia Política"
+author: "João Felipe Marques"
+date: "2024-08-28"
+output: html_document
+---
+
+
+```{r setup, include = F}
+knitr::opts_chunk$set(echo = T)
+library(ggplot2)
+library(reshape2)
+library(dplyr)
+library(officer)
+library(infer)
+library(readr)
+library(tidyr)
+library(readxl)
+library(usethis)
+library(stats)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Resumo
+
+Qual a relação entre a ideologia política dos governadores e a Violência de Estado? Para responder à pergunta, este trabalho coleta dados de ocorrência criminal do Anuário Brasileiro de Segurança Pública, entre 2010 e 2022, e compara com as ideologias políticas dos governadores de acordo com seus partidos políticos, usando duas bases de dados (Bolognesi e Zucco). A partir do conceito de Policy Process, o trabalho identifica se a mudança de agenda da direita brasileira influencia em decisões de impacto imediato na segurança pública. 
+
+## Introdução
+
+A relação entre a ideologia política dos governadores e a Violência de Estado é um tema relevante no campo da ciência política e das políticas públicas. O conceito de Policy Process, que considera a interação entre instituições, atores, ideias e crenças na formulação de políticas, é um arcabouço teórico para entender como mudanças na esfera governamental podem influenciar decisões relacionadas à segurança pública (Almeida & Gomes, 2018). A ascensão de grupos políticos de direita no Brasil, por exemplo, levanta questões sobre a possível adoção de políticas punitivas e seus impactos na violência estatal (Laterzo, 2023).
+
+A Constituição Federal Brasileira, ao descentralizar a responsabilidade pela segurança pública, atribui aos governadores a gestão das Polícias Militares, responsáveis pela preservação da ordem pública (Brasil, 1988). Esse arranjo federativo, combinado com a autonomia dos estados na formulação de políticas de segurança, posiciona os governadores como atores centrais na implementação de estratégias que podem influenciar diretamente os níveis de violência em suas jurisdições (Nunes, 2014; De Oliveira, 2020).
+
+Desta forma, o estudo investiga a relação entre a ideologia dos governadores e a Violência de Estado no Brasil entre 2010 e 2022, utilizando dados do Anuário Brasileiro de Segurança Pública e classificações ideológicas baseadas em dois bancos de dados reconhecidos. Através de análises de regressão linear, o trabalho busca identificar se a mudança na agenda política da direita brasileira teve impacto nas políticas de segurança pública, contribuindo para variações nos indicadores de violência estatal. 
+
+Ao explorar essas dinâmicas, o estudo pretende contribuir para uma melhor compreensão do papel que a ideologia política desempenha na formulação e implementação de políticas públicas de segurança no Brasil.
+
+# Método
+
+A partir da realização de Regressões Lineares, vamos verificar o peso da ideologia partidária dos governadores no comportamento de diferentes variáveis de Violência de Estado.
+
+Em primeira análise, serão inseridas as taxas de mortes ocorridas durante intervenções de policiais militares e civis (analisadas separadamente). Em sequência, adicionaremos as taxas de encarceramento, que já foram verificadas em estudos anteriores como influenciadas pela ideologia política.
+
+Para isso, utilizaremos a base pública disponibilizada pelo Anuário Brasileiro de Segurança Pública (ABSP) e calcularemos as taxas por 100 mil habitantes de acordo com dados do Ipea Data. Tendo em vista que o ABSP apresenta apenas os valores de quantidades de ocorrências por estados, o cálculo das taxas foi feito manualmente de acordo com a estimativa populacional para aquele ano.
+
+Posteriormente, as taxas de ocorrências por 100 mil habitantes foram unificadas por mandato (2011-2014; 2015-2019; 2020-2022), para obter melhores resultados em termos de identificação ideológico-partidária e evitar possíveis vieses de início ou fim de mandato.
+
+As bases ideológicas utilizadas foram as de Bolognesi et al. e Zucco et al., disponibilizadas em 2022 e 2023 respectivamente. Utilizando expert surveys para medir a ideologia dos partidos brasileiros, são duas das referências mais relevantes do período recente para estudos legislativos. Ambas referências são numéricas, podendo a de Bolognesi et al. ser delimitada em 7 categorias (da extrema-esquerda à extrema-direita).
+
+
+```{r, include=F}
+
+## Carregando base de crimes do Anuário Brasileiro de Segurança Pública 
+
+dados_crimes <- read.csv("/Users/jfmabs/Downloads/uf.csv.gz") %>%
+  mutate(
+    mandato = case_when(
+      ano %in% 2011:2014 ~ "2011-2014",
+      ano %in% 2015:2018 ~ "2015-2018",
+      ano %in% 2019:2022 ~ "2019-2022",
+      ano %in% 2023:2026 ~ "2023-2026",
+      TRUE ~ NA_character_ # caso existam anos fora desses intervalos
+    )
+  ) %>%
+  filter(!is.na(mandato)) %>%  # Filtrar casos de NA em 'mandato'
+  mutate(across(everything(), ~ ifelse(. == 0, NA_character_, as.character(.))))
+
+```
+
+
+```{r, include=F}
+
+## Agregando as taxas criminais para a média dos 4 anos de cada mandato
+
+crimes_agregados <- dados_crimes %>%
+  group_by(sigla_uf, mandato) %>%
+  mutate(across(where(is.numeric), ~ {
+    x <- .x[!is.na(.x) & .x != 0 & !is.nan(.x)]
+    if(length(x) == 0) NA else mean(x)
+  }, .names = "mean_{.col}")) %>%
+  ungroup()
+
+```
+
+
+```{r, include=F}
+
+## Criando um dataframe com nomes e siglas dos estados, para inserir na base de dados dos crimes
+
+estados <- data.frame(sigla_uf = c("AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO"),
+                      estado = c("Acre", "Alagoas", "Amapá", "Amazonas", "Bahia", "Ceará", "Distrito Federal", "Espírito Santo", "Goiás", "Maranhão", "Mato Grosso", "Mato Grosso do Sul", "Minas Gerais", "Pará", "Paraíba", "Paraná", "Pernambuco", "Piauí", "Rio de Janeiro", "Rio Grande do Norte", "Rio Grande do Sul", "Rondônia", "Roraima", "Santa Catarina", "São Paulo", "Sergipe", "Tocantins"))
+
+crimes_agregados_estados <- crimes_agregados %>%
+  left_join(estados, by = "sigla_uf")
+
+```
+
+
+```{r, include=F}
+
+# Inserindo dados partidários: BRAZILIAN LEGISLATIVE SURVEY
+
+### Nos dados dos partidos do BLS, vamos retirar casos mais antigos que 2009 
+
+dados_partidos <- read_csv("/Users/jfmabs/Desktop/Dados/BLS9_full.csv") %>%
+  filter(wave >= 2009) %>%
+  select(lrclass, wave,
+         lrpmdb, lrdem, lrpcb, lrpcdob, lrpds,
+         lrpfl, lrpl, lrpp, lrpp_ppb, lrpps, lrpr, lrpsb, lrpsd, lrpsdb, lrpsol,
+         lrpt, lrptb, lrsd, lrpsc, lrpros, lrpv, lrmdb, lrpsl, lrcid, lrrep,
+         lrpode, lrnovo, lrpdt) %>%
+  mutate_all(~ ifelse(. == -999.0, NA, .)) %>%
+  mutate(wave = case_when(
+    wave == 2009 ~ "2011-2014",
+    wave == 2013 ~ "2015-2018",
+    wave == 2017 ~ "2019-2022",
+    wave == 2021 ~ "2023-2026",
+    TRUE ~ as.character(wave)
+  )) %>%
+  mutate(across(everything(), ~ ifelse(is.nan(.x) | .x == "NaN", NA_real_, .x))) %>%
+  group_by(wave) %>%
+  summarise(across(where(is.numeric), mean, na.rm = TRUE))
+
+```
+
+
+```{r, include=F}
+
+### Vamos unir dados do PMDB e MDB e excluir a variável do PMDB
+
+valores_PMDB <- dados_partidos$lrpmdb[1:3]
+
+dados_partidos$lrmdb[1:3] <- valores_PMDB
+
+media_por_wave <- dados_partidos %>%
+  select(-lrpmdb, -lrrep)
+
+```
+
+
+```{r, include=F}
+
+### Modificando o nome das colunas pra algo que eu consiga entender bem
+
+zucco_class_longo <- media_por_wave %>%
+  rename(
+    DEM = lrdem, 
+    PCdoB = lrpcdob, 
+    PL = lrpl, 
+    PP = lrpp_ppb, 
+    PPS = lrpps,
+    PR = lrpr, 
+    PSB = lrpsb, 
+    PSD = lrpsd, 
+    PSDB = lrpsdb,
+    PSOL = lrpsol, 
+    PT = lrpt, 
+    PTB = lrptb, 
+    SDD = lrsd,
+    PSC = lrpsc, 
+    PROS = lrpros, 
+    PV = lrpv, 
+    MDB = lrmdb,
+    PSL = lrpsl, 
+    CIDADANIA = lrcid,
+    PODE = lrpode, 
+    NOVO = lrnovo, 
+    PDT = lrpdt
+  ) %>%
+  pivot_longer(
+    cols = -wave,
+    names_to = "partido",
+    values_to = "ideologia_zucco"
+  )
+
+```
+
+
+```{r, include=F}
+
+# Inserindo dados partidários: Bolognesi
+
+
+### Carregar dados da base de Bolognesi, disponível no Harvard Dataverse
+
+bolognesi <- read.table("/Users/jfmabs/Desktop/Dados/BD_survey_partyideology_brasil_expert_2018_HARVARD_DV.tab", 
+                        header = TRUE, sep = "\t", quote = "", fill = TRUE)
+
+dados_governadores2 <- read_csv("/Users/jfmabs/Desktop/Dados/dados governadores2 - Página1.csv")
+
+média_bolognesi <- bolognesi %>%
+  summarise(across(everything(), mean, na.rm = TRUE))
+
+```
+
+```{r, include=F}
+
+## MESCLANDO BASES ----
+
+### Unindo as bases com dados dos governadores, mandatos e partidos, com os períodos que correspondem às médias das taxas de crimes
+
+crimes_governadores <- left_join(crimes_agregados_estados, 
+                                 dados_governadores2, by = c("mandato" = "ano", 
+                                                             "estado" = "estado")) %>%
+  select(-sigla_estado, -ideologia_part, -apoio_gov)
+
+```
+
+
+```{r, include=F}
+
+# Corrigindo erros iniciais dos bancos
+
+## Os bancos não apresentaram os nomes e partidos dos governadores da PB, RR e AL, provavelmente devido a um erro na codificação dos mandatos
+
+crimes_governadores_corrigido <- crimes_governadores %>%
+  mutate(
+    governador = case_when(
+      sigla_uf == "PB" & (mandato == "2011-2014" | mandato == "2015-2018") ~ "Ricardo Vieira Coutinho",
+      sigla_uf == "PB" & (mandato != "2011-2014" & mandato != "2015-2018") ~ governador,
+      sigla_uf == "AL" & mandato == "2011-2014" ~ "Teotônio Brandão Vilela Filho",
+      sigla_uf == "AL" & mandato == "2015-2018" ~ "Renan Filho",
+      sigla_uf == "AL" & (mandato != "2011-2014" & mandato != "2015-2018") ~ governador,
+      sigla_uf == "RR" & mandato == "2011-2014" ~ "José de Anchieta Júnior",
+      sigla_uf == "RR" & mandato == "2015-2018" ~ "Antonio Denarium",
+      sigla_uf == "RR" & (mandato != "2011-2014" & mandato != "2015-2018") ~ governador,
+      TRUE ~ governador
+    ),
+    partido = case_when(
+      sigla_uf == "PB" & (mandato == "2011-2014" | mandato == "2015-2018") ~ "PSDB",
+      sigla_uf == "PB" & (mandato != "2011-2014" & mandato != "2015-2018") ~ partido,
+      sigla_uf == "AL" & mandato == "2011-2014" ~ "PSDB",
+      sigla_uf == "AL" & mandato == "2015-2018" ~ "MDB",
+      sigla_uf == "AL" & (mandato != "2011-2014" & mandato != "2015-2018") ~ partido,
+      sigla_uf == "RR" & mandato == "2011-2014" ~ "PMDB",
+      sigla_uf == "RR" & mandato == "2015-2018" ~ "PSL",
+      sigla_uf == "RR" & (mandato != "2011-2014" & mandato != "2015-2018") ~ partido,
+      TRUE ~ partido
+    )
+  )
+
+```
+
+
+
+```{r, include=F}
+
+# Os dados de bolognesi geraram uma nova base com 80 colunas, em que cada coluna apresenta um partido e o valor da ideologia. 
+
+# Seria mais intuitivo transformar em uma base verticalizada, com uma coluna intitulada "partido" e outra "ideologia", para análise posterior
+
+# Invertendo dados
+
+bolognesi_invertido <- média_bolognesi %>%
+  t() %>%
+  as.data.frame() %>%
+  setNames(.[1, ]) %>%
+  slice(-1)
+
+
+bolognesi_vertical <- média_bolognesi %>%
+  pivot_longer(cols = everything(), names_to = "partido", 
+               values_to = "valores_bolognesi")
+
+crimes_governadores <- crimes_governadores %>%
+  mutate(partido = case_when(
+    partido == "PMDB" ~ "MDB",
+    partido == "Progressistas" ~ "PP",
+    TRUE ~ partido  # Manter os demais partidos como estão
+  ))
+
+```
+
+
+```{r, include=F}
+
+## Simplificação dos nomes dos partidos
+
+bolognesi_vertical <- bolognesi_vertical %>%
+  mutate(partido = case_when(
+    partido == "Progressistas" ~ "PP",
+    TRUE ~ partido  # Manter os demais partidos como estão
+  ))
+
+```
+
+
+```{r, include=F}
+
+## Adicionamos uma coluna à base crimes_governadores, contendo o valor da ideologia por partido, de acordo com bolognesi.
+
+gov.crim.ide <- merge(crimes_governadores, bolognesi_vertical, 
+                      by = "partido", all.x = TRUE)
+
+```
+
+
+```{r, include=F}
+
+## Agora vou adicionar uma coluna nova no banco para a classificação do Cesar Zucco
+
+gov_crim_ide_ideologia <- merge(gov.crim.ide, zucco_class_longo,
+                                by.x = c("partido", "mandato"),
+                                by.y = c("partido", "wave"),
+                                all.x = TRUE) %>%
+  mutate(across(where(is.numeric), ~ round(.x, 2)))
+
+```
+
+
+```{r, include=F}
+
+## Calculando a taxa das ocorrências de crimes de acordo com a população de cada estado
+
+ipeadata <- read_excel("/Users/jfmabs/Desktop/Dados/ipeadata[20-06-2024-10-18].xls")
+
+populacao_long <- ipeadata %>%
+  select(Sigla, Estado, "2014", "2018", "2022") %>%
+  rename(sigla = Sigla) %>%
+  pivot_longer(cols = starts_with("20"), names_to = "Ano", values_to = "Populacao") %>%
+  mutate(Ano_modificado = case_when(
+    Ano == "2014" ~ "2011-2014",
+    Ano == "2018" ~ "2015-2018",
+    Ano == "2022" ~ "2019-2022",
+    TRUE ~ Ano  # Manter o valor original para outros casos
+  )) %>%
+  select(-Ano)  # Remover a coluna Ano, se ainda estiver presente 
+
+populacao_long <- rename(populacao_long, ano = Ano_modificado)
+
+populacao_crimes <- gov_crim_ide_ideologia %>%
+  left_join(populacao_long, by = c("sigla_uf" = "sigla", "mandato" = "ano"))
+
+taxas_crimes <- populacao_crimes %>%
+  mutate(across(starts_with("quantidade_"), as.numeric)) %>%
+  mutate(Populacao = as.numeric(Populacao)) %>%
+  mutate(across(starts_with("quantidade_"), ~ . / Populacao * 100)) %>%
+  select(partido, mandato, sigla_uf, valores_bolognesi, ideologia_zucco, despesa_empenhada_seguranca_publica, starts_with("quantidade_"))
+
+```
+
+
+```{r, include=F}
+
+# Bolognesi delimita as classificações por categoria a depender do resultado em uma escala de 0 a 10, dessa forma, para criar uma variável categórica, vamos criar uma coluna com essas condições
+
+taxas_crimes <- taxas_crimes %>%
+  mutate(categoria_bolognesi = cut(valores_bolognesi, 
+                                   breaks = c(0, 1.5, 3, 4.5, 5.5, 7, 8.5, 10), 
+                                   labels = c("Extrema-Esquerda", "Esquerda", "Centro-Esquerda", "Centro", "Centro-Direita", "Direita", "Extrema-Direita")))
+
+taxas_crimes_limpo <- na.omit(taxas_crimes)
+
+```
+
+
+## H1: Estados governados por políticos de direita tendem a apresentar maiores taxas de violência de Estado
+
+Vamos aplicar uma regressão linear entre as variáveis integrantes ao conceito de violência de Estado e a variável de classificação ideológica (numérica)
+
+```{r, include=T}
+
+
+# Calculando a regressão entre a taxa de mortes ocorridas em intervenções de policiais civis com a escala ideológica de Bolognesi
+
+Civil_Bolognesi <- lm(cbind(quantidade_morte_intervencao_policial_civil_servico 
+                   ) ~ cbind(
+                     valores_bolognesi), data = taxas_crimes)
+summary(Civil_Bolognesi)
+
+
+# Calculando a regressão entre a taxa de mortes ocorridas em intervenções de policiais militares com a escala ideológica de Bolognesi
+
+Militar_Bolognesi <- lm(cbind(quantidade_morte_intervencao_policial_militar_servico 
+                   ) ~ cbind(
+                     valores_bolognesi), data = taxas_crimes)
+
+summary(Militar_Bolognesi)
+
+# Calculando a regressão entre a taxa de pessoas no sistema penitenciário com a escala ideológica de Bolognesi
+
+Prisional_Bolognesi <- lm(cbind(quantidade_populacao_sistema_penitenciario 
+                   ) ~ cbind(
+                     valores_bolognesi), data = taxas_crimes)
+
+summary(Prisional_Bolognesi)
+
+```
+
+# Análise
+
+Os resultados das regressões lineares fornecem diferentes perspectivas sobre a influência da ideologia política dos governadores na violência de Estado.
+
+- Intervenções de policiais civis e militares: Os resultados indicam a ausência de uma relação estatisticamente significativa entre a ideologia dos governadores e as taxas de mortes em intervenções policiais. A impossibilidade de rejeitar a hipótese nula pode ser compreendida considerando o argumento de que a ação policial, especialmente em contextos de intervenções letais, é frequentemente influenciada por fatores institucionais e estruturais mais amplos, exigindo a inserção de covariáveis ou de uma análise específica dos estados. Estudos como os de Nunes (2014) e Mello et al. (2004) destacam que, apesar da autonomia estadual na gestão das Polícias Militares e Civis, essas forças são profundamente enraizadas em práticas operacionais que podem ser resilientes às mudanças de curto prazo na orientação política dos governadores.
+
+- População no sistema penitenciário: Apesar da necessidade de parcimônia com os resultados, foi verificada uma relação positiva significativa entre a ideologia de direita e o aumento da população no sistema penitenciário. Essa questão é consistente com a literatura que argumenta que governos de direita são mais propensos a adotar políticas punitivas e de encarceramento em massa. Wacquant (2009) e Garland (2001) discutem como políticas de "lei e ordem" são frequentemente priorizadas em administrações de direita, resultando em um aumento das taxas de encarceramento como resposta a demandas sociais por segurança e controle social. O tema também foi estudado no Brasil, não tornando esse achado um novo paradigma no cenário nacional. Essa correlação positiva sugere que governadores de direita podem estar mais inclinados a implementar políticas que aumentem o encarceramento, o que é corroborado pela evidência empírica presente na análise.
+
+# Conclusão
+
+O conceito de Policy Process, como discutido por Almeida e Gomes (2018), ajuda a compreender essas dinâmicas ao destacar que a formulação de políticas públicas é influenciada por uma série de fatores que vão além da ideologia, incluindo instituições e contextos locais. Embora a ideologia política possa orientar as decisões, a implementação de políticas, especialmente em áreas complexas como a segurança pública, depende das interações entre instituições, atores e ideias. Isso pode explicar porque a ideologia dos governadores não teve um impacto significativo nas taxas de intervenções policiais letais, mas teve um efeito claro nas políticas de encarceramento. 
+
+Os achados apontam para a necessidade de uma análise mais aprofundada dos mecanismos pelos quais as ideologias políticas se traduzem em diferentes dimensões da violência de Estado, contribuindo para a literatura que explora a interface entre política, segurança e direitos humanos no contexto brasileiro.
